@@ -5,8 +5,9 @@ import Html exposing (Html, button, div, text, span)
 import Html.Events exposing (onClick)
 import Html.Attributes exposing (class, classList)
 import Json.Decode exposing (Decoder, field, string, map6, list, decodeValue, array)
-import Array
 import Random
+import List.Extra
+import Maybe.Extra
 
 main =
   Browser.element { init = init, update = update, subscriptions = subscriptions, view = view }
@@ -18,8 +19,7 @@ type alias Model =
        questionsToAnswer: List QuestionToAnswer
      , currentQuestion: Int
      , questions: List Int
-     , showModal: Bool
-     , message: String
+     , state: GameState
     }
 
 type alias QuestionToAnswer =
@@ -31,7 +31,16 @@ type alias QuestionToAnswer =
      ,  d: String
      ,  answer: String
     }
+    
 
+type GameState = GameOn
+  | GameOver GameOverStatus
+  
+type alias GameOverStatus = 
+  {
+     showModal: Bool
+   , message: String
+  }
 
 questionDecoder : Decoder QuestionToAnswer
 questionDecoder =
@@ -46,7 +55,7 @@ questionDecoder =
 --init model
 init : Json.Decode.Value -> (Model, Cmd Msg)
 init questions =
-  (Model (getQuestions questions) 1 [] False "", get15Randoms)
+  (Model (getQuestions questions) 1 [] GameOn, get15Randoms)
 
 
 getQuestions : Json.Decode.Value -> List QuestionToAnswer
@@ -68,15 +77,15 @@ subscriptions model =
     Sub.none
 
 -- UPDATE
-type Msg = Answer String
+type Msg = Answer String String
   | RndGen Int
   | CloseModal
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case msg of
-    Answer ans ->
-      ( (checkAnswer model ans), Cmd.none )
+    Answer ans corrAns ->
+      ( (checkAnswer model ans corrAns), Cmd.none )
     RndGen rndGen ->
       if List.length (model.questions) < 15
         then
@@ -88,32 +97,33 @@ update msg model =
       else
         (model, Cmd.none)
     CloseModal ->
-      ({model | showModal = False, currentQuestion = 1, questions = []}, get15Randoms)
-      
-checkAnswer model ans =
-  if(.answer (extractQuestions model) == ans)
-    then
-      if model.currentQuestion >= 15
-        then
-          composeMsg model
-      else
-        ({model | currentQuestion = model.currentQuestion + 1})
-  else
-    composeMsg model
+      ({model | state = GameOn, currentQuestion = 1, questions = []}, get15Randoms)
+
+checkAnswer : Model -> String -> String -> Model
+checkAnswer model ans corrAns =
+   if(corrAns == ans)
+     then
+       if model.currentQuestion >= 15
+         then
+           composeMsg model
+       else
+         ({model | currentQuestion = model.currentQuestion + 1})
+   else
+     composeMsg model
     
 composeMsg: Model -> Model
 composeMsg model =
   if model.currentQuestion == 15
     then
-      ({model | showModal = True, message = "Game over!!! You won the ultimate prize €1,000,000"})
+      ({model | state = GameOver {showModal = True, message = "Game over!!! You won the ultimate prize €1,000,000"}})
   else if model.currentQuestion < 15 && model.currentQuestion >= 10
     then
-      ({model | showModal = True, message = "Game over!!! You won €32,000"})
+      ({model | state = GameOver {showModal = True, message = "Game over!!! You won €32,000"}})
   else if model.currentQuestion < 10 && model.currentQuestion >= 5
     then
-      ({model | showModal = True, message = "Game over!!! You won €1,000"})
+      ({model | state = GameOver {showModal = True, message = "Game over!!! You won €1,000"}})
   else
-      ({model | showModal = True, message = "Game over!!! You won €100"})
+       ({model | state = GameOver {showModal = True, message = "Game over!!! You won €100"}})
 
 -- VIEW
 view : Model -> Html Msg
@@ -129,7 +139,11 @@ view model =
                       [ lifeLineSection model
                       ]
                 , div [ class "row"]
-                      [ answerSection model
+                      [ 
+                       model
+                       |> extractQuestions
+                       |> Maybe.Extra.join
+                       |> answerSection
                       ]
                 ]
           ]
@@ -139,24 +153,20 @@ view model =
 
 modal : Model -> Html Msg
 modal model =
-  let 
-    elem = 
-        if model.showModal
-          then
-            div [class "game-over-modal"]
+    case model.state of
+      GameOver status ->
+        div [class "game-over-modal"]
+            [
+            div [ class "game-over-modal-content"]
                 [
-                div [ class "game-over-modal-content"]
-                    [
-                      span [ class "close-tab", onClick CloseModal]
-                           [text "×"]
-                    , div [ class "game-over-modal-content-holder"]
-                         [ text model.message]
-                    ]
-                 ]
-         else
-           div [][]
-   in
-     elem
+                  span [ class "close-tab", onClick CloseModal]
+                       [text "×"]
+                , div [ class "game-over-modal-content-holder"]
+                     [ text status.message]
+                ]
+             ]
+      GameOn ->
+        div [][]
 
 
 avatarSection : Model -> Html msg
@@ -298,41 +308,33 @@ lifeLineSection model =
 
         ]
 
-answerSection : Model -> Html Msg
-answerSection model =
-    div [ class "answers col-xs-12"]
-        [ div [class "row"]
-              [ div [ class "question"]
-                    [ text (.question (extractQuestions model))]
-              ]
-        , div [ class "row"]
-              [ div [ class "answer a", onClick (Answer "A")]
-                    [ text (.a (extractQuestions model))]
-              , div [ class "answer b", onClick (Answer "B")]
-                    [ text (.b (extractQuestions model))]
-              , div [ class "answer c", onClick (Answer "C")]
-                    [ text (.c (extractQuestions model))]
-              , div [ class "answer d", onClick (Answer "D")]
-                    [ text (.d (extractQuestions model))]      
-              ]
-        ]
-        
-extractQuestions : Model -> QuestionToAnswer
+answerSection : Maybe QuestionToAnswer -> Html Msg
+answerSection questions =
+    case questions of
+      Just question ->
+        div [ class "answers col-xs-12"]
+            [ div [class "row"]
+                  [ div [ class "question"]
+                        [ text (question.question)]
+                  ]
+            , div [ class "row"]
+                  [ div [ class "answer a", onClick (Answer "A" question.answer)]
+                        [ text (.a (question))]
+                  , div [ class "answer b", onClick (Answer "B" question.answer)]
+                        [ text (.b (question))]
+                  , div [ class "answer c", onClick (Answer "C" question.answer)]
+                        [ text (.c (question))]
+                  , div [ class "answer d", onClick (Answer "D" question.answer)]
+                        [ text (.d (question))]      
+                  ]
+            ]
+      Nothing ->
+        div [][]
+    
+    
+extractQuestions : Model -> Maybe (Maybe QuestionToAnswer)
 extractQuestions model =
-  case(
     model.questions
-      |> Array.fromList
-      |> Array.get (model.currentQuestion - 1)
-    ) of
-    Just q ->
-      case(
-        model.questionsToAnswer
-          |> Array.fromList
-          |> Array.get q
-      ) of
-        Nothing ->
-          QuestionToAnswer "empty" "empty" "empty" "empty" "empty" "empty"
-        Just val ->
-          val
-    Nothing ->
-      QuestionToAnswer "empty" "empty" "empty" "empty" "empty" "empty"
+    |> List.Extra.getAt (model.currentQuestion - 1)
+    |> Maybe.map (\m -> List.Extra.getAt m model.questionsToAnswer)
+      
