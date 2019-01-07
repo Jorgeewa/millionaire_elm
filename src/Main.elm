@@ -141,7 +141,7 @@ view model =
                 , div [ class "row"]
                       [ 
                        model
-                       |> extractQuestions
+                       |> getCurrentQuestion
                        |> Maybe.Extra.join
                        |> answerSection
                       ]
@@ -332,8 +332,8 @@ answerSection questions =
         div [][]
     
     
-extractQuestions : Model -> Maybe (Maybe QuestionToAnswer)
-extractQuestions model =
+getCurrentQuestion : Model -> Maybe (Maybe QuestionToAnswer)
+getCurrentQuestion model =
     model.questions
     |> List.Extra.getAt (model.currentQuestion - 1)
     |> Maybe.map (\m -> List.Extra.getAt m model.questionsToAnswer)
